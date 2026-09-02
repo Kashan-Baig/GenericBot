@@ -1,0 +1,126 @@
+{
+  "flow_id": "demo_flow",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "message": null,
+      "options": null,
+      "variable": null,
+      "condition": null,
+      "true_node": null,
+      "false_node": null,
+      "next_node": "welcome"
+    },
+    {
+      "id": "welcome",
+      "type": "message",
+      "message": "Welcome to our business!",
+      "options": null,
+      "variable": null,
+      "condition": null,
+      "true_node": null,
+      "false_node": null,
+      "next_node": "choose_service"
+    },
+    {
+      "id": "choose_service",
+      "type": "buttons",
+      "message": "What would you like to do?",
+      "options": [
+        {
+          "label": "Service A",
+          "value": "service_a",
+          "next_node": "service_a_info"
+        },
+        {
+          "label": "Service B",
+          "value": "service_b",
+          "next_node": "service_b_info"
+        }
+      ],
+      "variable": null,
+      "condition": null,
+      "true_node": null,
+      "false_node": null,
+      "next_node": null
+    },
+    {
+      "id": "service_a_info",
+      "type": "message",
+      "message": "Service A provides professional IT consulting.",
+      "options": null,
+      "variable": null,
+      "condition": null,
+      "true_node": null,
+      "false_node": null,
+      "next_node": "ask_name"
+    },
+    {
+      "id": "ask_name",
+      "type": "input",
+      "message": "What is your name?",
+      "options": null,
+      "variable": "customer_name",
+      "condition": null,
+      "true_node": null,
+      "false_node": null,
+      "next_node": "check_name_condition"
+    },
+    {
+      "id": "check_name_condition",
+      "type": "condition",
+      "message": null,
+      "options": null,
+      "variable": null,
+      "condition": "customer_name == 'Kashan'",
+      "true_node": "greet_kashan",
+      "false_node": "greet_generic",
+      "next_node": null
+    },
+    {
+      "id": "greet_kashan",
+      "type": "message",
+      "message": "Welcome back, Kashan! We have prepared a special discount for you.",
+      "options": null,
+      "variable": null,
+      "condition": null,
+      "true_node": null,
+      "false_node": null,
+      "next_node": "end_node"
+    },
+    {
+      "id": "greet_generic",
+      "type": "message",
+      "message": "Nice to meet you! Thank you for sharing your name.",
+      "options": null,
+      "variable": null,
+      "condition": null,
+      "true_node": null,
+      "false_node": null,
+      "next_node": "end_node"
+    },
+    {
+      "id": "service_b_info",
+      "type": "message",
+      "message": "Service B provides dental hygiene services.",
+      "options": null,
+      "variable": null,
+      "condition": null,
+      "true_node": null,
+      "false_node": null,
+      "next_node": "end_node"
+    },
+    {
+      "id": "end_node",
+      "type": "end",
+      "message": "Thank you for chatting with us. Goodbye!",
+      "options": null,
+      "variable": null,
+      "condition": null,
+      "true_node": null,
+      "false_node": null,
+      "next_node": null
+    }
+  ]
+}

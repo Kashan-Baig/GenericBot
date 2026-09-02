@@ -1,0 +1,157 @@
+# ============================================================
+# ENVIRONMENT / SECRETS
+# ============================================================
+# Secrets / runtime credential storage
+app/storage/credentials.json
+app/storage/credential_key
+
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+.venv
+.pytest_cache
+__pycache__
+# ============================================================
+# NEXT.JS / FRONTEND
+# ============================================================
+
+node_modules/
+.next/
+out/
+dist/
+build/
+.vercel/
+
+# Next.js cache
+.next/cache/
+
+# TypeScript
+*.tsbuildinfo
+
+# ============================================================
+# PYTHON / FASTAPI BACKEND
+# ============================================================
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# ============================================================
+# IDE / EDITORS
+# ============================================================
+
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ============================================================
+# OS FILES
+# ============================================================
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================================================
+# LOGS
+# ============================================================
+
+*.log
+logs/
+
+# ============================================================
+# DATABASE / LOCAL DATA
+# ============================================================
+
+*.db
+*.sqlite
+*.sqlite3
+
+# ============================================================
+# PYTHON CACHE / TEMP
+# ============================================================
+
+.pyre/
+.mypy_cache/
+.ruff_cache/
+
+# ============================================================
+# UPLOADS / GENERATED FILES
+# ============================================================
+
+uploads/
+tmp/
+temp/
+cache/
+
+# ============================================================
+# LOCAL CONFIG / SECRETS
+# ============================================================
+
+*.pem
+*.key
+*.crt
+
+# ============================================================
+# JUPYTER
+# ============================================================
+
+.ipynb_checkpoints/
+
+# ============================================================
+# MAC / WINDOWS
+# ============================================================
+
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows thumbnail cache
+ehthumbs.db
+Thumbs.db
+
+# ============================================================
+# OPTIONAL: LOCAL AI / MODEL FILES
+# ============================================================
+
+*.safetensors
+*.pt
+*.pth
+*.onnx
+*.bin
+
+# ============================================================
+# OPTIONAL: GENERATED EXPORTS
+# ============================================================
+
+*.csv
+*.xlsx
+*.zip
+# Runtime credential secrets (never commit)
+app/storage/credentials.json
+app/storage/.credential_key
