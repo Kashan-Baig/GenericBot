@@ -9,7 +9,7 @@ from app.storage.conversation_store import store
 from app.graph.graph import app_graph
 from app.graph.executor import get_node_by_id
 from app.nodes.base import render_template
-from app.storage.credentials import list_credentials, create_credential, delete_credential
+from app.storage.credentials import list_credentials, create_credential, delete_credential, get_credential
 
 
 
@@ -52,8 +52,12 @@ class ChatResponse(BaseModel):
 class CredentialCreateRequest(BaseModel):
     name: str
     provider: str
-    api_key: str
+    api_key: str = ""
     api_url: Optional[str] = None
+    # Generic secret bag for non-AI credentials, e.g. a database connection:
+    # {"host": "...", "port": "5432", "database": "...", "username": "...", "password": "..."}
+    # or a REST API: {"base_url": "...", "auth_header": "Authorization"}.
+    extra: Optional[Dict[str, str]] = None
 
 
 @router.get("/credentials", response_model=List[Dict[str, Any]])
@@ -64,7 +68,9 @@ async def get_credentials():
 @router.post("/credentials", response_model=Dict[str, Any])
 async def add_credential(request: CredentialCreateRequest):
     try:
-        return create_credential(request.name, request.provider, request.api_key, request.api_url)
+        return create_credential(
+            request.name, request.provider, request.api_key, request.api_url, request.extra
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -74,6 +80,54 @@ async def remove_credential(credential_id: str):
     if not delete_credential(credential_id):
         raise HTTPException(status_code=404, detail="Credential not found")
     return {"deleted": True}
+
+
+# ============================================================
+# DATA SOURCE TEST API
+# ============================================================
+#
+# Lets the flow builder UI run a Data Source node's config against the real
+# source (limited to a handful of rows) before saving the flow, the same way
+# n8n's node "test step" button works.
+
+class DataSourceTestRequest(BaseModel):
+    source_type: str
+    credential_id: Optional[str] = None
+    table: Optional[str] = None
+    query: Optional[str] = None
+    endpoint: Optional[str] = None
+    base_url: Optional[str] = None
+    file_name: Optional[str] = None
+    filters: Optional[Dict[str, Any]] = None
+    limit: int = 5
+
+
+@router.post("/data-sources/test", response_model=Dict[str, Any])
+async def test_data_source(request: DataSourceTestRequest):
+    from app.nodes.data_source import DataSourceNodeExecutor
+
+    node_config = {
+        "id": "test",
+        "type": "data_source",
+        "config": {
+            "source_type": request.source_type,
+            "credential_id": request.credential_id,
+            "table": request.table,
+            "query": request.query,
+            "endpoint": request.endpoint,
+            "base_url": request.base_url,
+            "file_name": request.file_name,
+            "filters": request.filters or {},
+            "limit": request.limit,
+            "output_variable": "records",
+        },
+    }
+    try:
+        state = DataSourceNodeExecutor().execute(node_config, {"variables": {}})
+        records = state["variables"]["records"]
+        return {"success": True, "count": len(records), "sample": records[: request.limit]}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 # ============================================================
@@ -203,6 +257,23 @@ async def chat(request: ChatRequest):
 
             state["conversation_id"] = conversation_id
 
+            # ------------------------------------------------------
+            # A previous turn already ran this flow to completion.
+            # A brand-new incoming message means the user wants to ask
+            # something new — start a fresh run of the flow instead of
+            # re-"executing" the END node, which has nothing left to do
+            # and would just return an empty response forever after.
+            # (This is what produced "The backend returned no message.
+            # Current node: END." on the second message.)
+            # ------------------------------------------------------
+            if (
+                user_input_provided
+                and (state.get("status") == "completed" or state.get("current_node") == "END")
+            ):
+                state["current_node"] = None
+                state["variables"] = {}
+                state["status"] = "running"
+
             state["_turn_initial_node"] = (
                 state.get("current_node")
             )
@@ -228,6 +299,29 @@ async def chat(request: ChatRequest):
 
     state.setdefault("conversation_history", [])
     state.setdefault("variables", {})
+
+    # ========================================================
+    # 4b. Make the raw chat message available to EVERY node
+    # ========================================================
+    #
+    # render_template() only ever looks at state["variables"], and
+    # previously the only way a value landed there was an explicit
+    # Input node capturing it into its configured `variable` (default
+    # "user_input") while the flow was paused and waiting on that node.
+    #
+    # That means a flow like PostgreSQL -> AI -> END, which has no Input
+    # node at all, could never reference the user's message in the AI
+    # node's prompt: {{user_input}} simply wasn't set, so it rendered as
+    # blank text and the model had no idea what was asked.
+    #
+    # {{user_message}} is a separate, always-on variable holding exactly
+    # what the user typed this turn, regardless of flow shape. It does not
+    # touch the Input node's own `variable` capture (still {{user_input}}
+    # by default), so existing flows keep working unchanged.
+    # ========================================================
+
+    if user_message:
+        state["variables"]["user_message"] = user_message
 
     # ========================================================
     # 5. Record User Message

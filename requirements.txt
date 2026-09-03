@@ -5,8 +5,7 @@ pydantic>=2.0
 pytest>=7.0.0
 httpx>=0.24.0
 python-dotenv>=1.0.0
-<<<<<<< HEAD
-
 cryptography>=42.0.0
-=======
->>>>>>> 00c7d9e (llm connection)
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.9
+pymysql>=1.1.0

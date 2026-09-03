@@ -1,0 +1,172 @@
+{
+  "flow_id": "flow-1788422602061",
+  "nodes": [
+    {
+      "id": "start-1788422602061-0",
+      "type": "start",
+      "message": null,
+      "text": null,
+      "options": null,
+      "variable": null,
+      "condition": null,
+      "true_node": null,
+      "false_node": null,
+      "next_node": "input-1788442964133-4",
+      "config": {
+        "label": "New trigger",
+        "text": "",
+        "options": [],
+        "variable": "",
+        "condition": "",
+        "prompt": "",
+        "api_url": "",
+        "api_key": "",
+        "model": "",
+        "provider": "",
+        "credential_id": ""
+      },
+      "data": null,
+      "position": {
+        "x": 301,
+        "y": 78
+      }
+    },
+    {
+      "id": "ai-1788440518910-3",
+      "type": "ai",
+      "message": "You are a patient information assistant.\n\nUser's message:\n{{user_input}}\n\nPatient records from the database:\n{{records}}\n\nAnswer the user's question using the patient records.\n\nIf the user asks \"show me all patients\", list all patients found in the database.\n\nFor each patient show:\n- Patient ID\n- Full Name\n- Email\n- Contact Number\n- Age\n\nDo not invent information.",
+      "text": null,
+      "options": null,
+      "variable": null,
+      "condition": null,
+      "true_node": null,
+      "false_node": null,
+      "next_node": "end-1788440558428-4",
+      "config": {
+        "label": "Fetch records",
+        "prompt": "You are a patient information assistant.\n\nUser's message:\n{{user_input}}\n\nPatient records from the database:\n{{records}}\n\nAnswer the user's question using the patient records.\n\nIf the user asks \"show me all patients\", list all patients found in the database.\n\nFor each patient show:\n- Patient ID\n- Full Name\n- Email\n- Contact Number\n- Age\n\nDo not invent information.",
+        "api_url": "",
+        "api_key": "",
+        "model": "openai/gpt-oss-120b",
+        "provider": "groq",
+        "source_type": "postgresql",
+        "table": "patients",
+        "filters": {},
+        "limit": 50,
+        "output_variable": "records",
+        "credential_id": "cred_51eb2faa0189",
+        "credential_name": "",
+        "text": "You are a patient information assistant.\n\nUser's message:\n{{user_input}}\n\nPatient records from the database:\n{{records}}\n\nAnswer the user's question using the patient records.\n\nIf the user asks \"show me all patients\", list all patients found in the database.\n\nFor each patient show:\n- Patient ID\n- Full Name\n- Email\n- Contact Number\n- Age\n\nDo not invent information.",
+        "options": [],
+        "variable": "",
+        "condition": ""
+      },
+      "data": null,
+      "position": {
+        "x": 428,
+        "y": 303
+      },
+      "prompt": "You are a patient information assistant.\n\nUser's message:\n{{user_input}}\n\nPatient records from the database:\n{{records}}\n\nAnswer the user's question using the patient records.\n\nIf the user asks \"show me all patients\", list all patients found in the database.\n\nFor each patient show:\n- Patient ID\n- Full Name\n- Email\n- Contact Number\n- Age\n\nDo not invent information.",
+      "credential_id": "cred_51eb2faa0189",
+      "model": "openai/gpt-oss-120b",
+      "provider": "groq"
+    },
+    {
+      "id": "end-1788440558428-4",
+      "type": "end",
+      "message": "Thankyou for coming",
+      "text": null,
+      "options": null,
+      "variable": null,
+      "condition": null,
+      "true_node": null,
+      "false_node": null,
+      "next_node": null,
+      "config": {
+        "label": "End conversation",
+        "text": "Thankyou for coming",
+        "options": [],
+        "variable": "",
+        "condition": "",
+        "prompt": "",
+        "api_url": "",
+        "api_key": "",
+        "model": "",
+        "provider": "",
+        "credential_id": ""
+      },
+      "data": null,
+      "position": {
+        "x": 761,
+        "y": 303
+      }
+    },
+    {
+      "id": "input-1788442964133-4",
+      "type": "input",
+      "message": "How can i help you",
+      "text": null,
+      "options": null,
+      "variable": "user_input",
+      "condition": null,
+      "true_node": null,
+      "false_node": null,
+      "next_node": "data_source-1788442982686-4",
+      "config": {
+        "label": "Collect information",
+        "text": "How can i help you",
+        "variable": "user_input",
+        "options": [],
+        "condition": "",
+        "prompt": "",
+        "api_url": "",
+        "api_key": "",
+        "model": "",
+        "provider": "",
+        "credential_id": ""
+      },
+      "data": null,
+      "position": {
+        "x": 592,
+        "y": 74
+      }
+    },
+    {
+      "id": "data_source-1788442982686-4",
+      "type": "data_source",
+      "message": null,
+      "text": null,
+      "options": null,
+      "variable": null,
+      "condition": null,
+      "true_node": null,
+      "false_node": null,
+      "next_node": "ai-1788440518910-3",
+      "config": {
+        "label": "Fetch records",
+        "source_type": "postgresql",
+        "table": "patients",
+        "filters": {},
+        "limit": 50,
+        "output_variable": "records",
+        "text": "",
+        "options": [],
+        "variable": "",
+        "condition": "",
+        "prompt": "",
+        "api_url": "",
+        "api_key": "",
+        "model": "",
+        "provider": "",
+        "credential_id": "cred_8ae8b59fd14b",
+        "credential_name": "Medflow"
+      },
+      "data": null,
+      "position": {
+        "x": 901,
+        "y": 75
+      }
+    }
+  ],
+  "edges": []
+}

@@ -11,6 +11,7 @@ from app.nodes.input import InputNodeExecutor
 from app.nodes.condition import ConditionNodeExecutor
 from app.nodes.end import EndNodeExecutor
 from app.nodes.switch import SwitchNodeExecutor
+from app.nodes.data_source import DataSourceNodeExecutor
 from app.storage.credentials import get_credential
 
 logger = logging.getLogger("flow_engine.nodes.ai")
@@ -48,13 +49,11 @@ class AIResponseNodeExecutor(BaseNodeExecutor):
       * Google Gemini
       * Any OpenAI-compatible endpoint via ``provider=custom`` + ``api_url``
 
-<<<<<<< HEAD
-    Credentials are referenced by credential_id. Legacy per-node api_key values are
-    still accepted for migration, but workflow storage strips them after migration.
-=======
-    Credentials can be supplied per node (api_key) or through environment
-    variables. Node settings always win over environment settings.
->>>>>>> 00c7d9e (llm connection)
+    Credentials are referenced by credential_id and resolved through the
+    encrypted Credential Manager. Legacy per-node api_key values (or the
+    provider's environment variable) are still accepted as a fallback so
+    older flows and local dev setups keep working. Node settings always win
+    over environment settings.
     """
 
     PROVIDER_DEFAULTS = {
@@ -319,7 +318,6 @@ class AIResponseNodeExecutor(BaseNodeExecutor):
                 f"Provider '{provider_raw}' needs an API URL. Set it in the AI node or use a supported provider."
             )
 
-<<<<<<< HEAD
         credential_id = (
             config.get("credential_id")
             or node_config.get("credential_id")
@@ -332,12 +330,6 @@ class AIResponseNodeExecutor(BaseNodeExecutor):
         )
         if credential and credential.get("api_url") and provider == "custom" and not api_url:
             api_url = credential["api_url"]
-=======
-        api_key = (
-            config.get("api_key") or config.get("apiKey")
-            or node_config.get("api_key") or self._env_api_key(provider)
-        )
->>>>>>> 00c7d9e (llm connection)
 
         try:
             protocol = info["protocol"]
@@ -353,7 +345,6 @@ class AIResponseNodeExecutor(BaseNodeExecutor):
                 ai_text = "[AI response was empty.]"
         except Exception as exc:
             logger.exception("AI node '%s' (%s) call failed: %s", node_config.get("id"), provider_raw, exc)
-<<<<<<< HEAD
             error_next = node_config.get("error_next_node") or config.get("error_next_node")
             state.setdefault("variables", {})["error"] = {
                 "node_id": node_config.get("id"),
@@ -366,8 +357,6 @@ class AIResponseNodeExecutor(BaseNodeExecutor):
                 state["status"] = "running"
                 state["response"] = f"[AI error: {exc}]"
                 return state
-=======
->>>>>>> 00c7d9e (llm connection)
             ai_text = f"[AI request failed: {exc}]"
 
         if state.get("response"):
@@ -394,6 +383,7 @@ _cond_exec = ConditionNodeExecutor()
 _end_exec = EndNodeExecutor()
 _switch_exec = SwitchNodeExecutor()
 _ai_exec = AIResponseNodeExecutor()
+_data_source_exec = DataSourceNodeExecutor()
 
 _registry: Dict[str, BaseNodeExecutor] = {
     "start": _start_exec,
@@ -409,6 +399,8 @@ _registry: Dict[str, BaseNodeExecutor] = {
     "ai_response": _ai_exec,
     "ai": _ai_exec,
     "llm": _ai_exec,
+    "data_source": _data_source_exec,
+    "database": _data_source_exec,
 }
 
 

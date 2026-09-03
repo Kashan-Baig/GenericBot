@@ -67,22 +67,43 @@ def list_credentials() -> List[Dict[str, Any]]:
                 "created_at": item.get("created_at"),
                 "updated_at": item.get("updated_at"),
                 "has_api_key": bool(item.get("api_key")),
+                "extra_keys": item.get("extra_keys", []),
             })
         return result
 
 
-def create_credential(name: str, provider: str, api_key: str, api_url: Optional[str] = None) -> Dict[str, Any]:
-    if not api_key or not api_key.strip():
-        raise ValueError("API key is required")
+def create_credential(
+    name: str,
+    provider: str,
+    api_key: str = "",
+    api_url: Optional[str] = None,
+    extra: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """Create a credential.
+
+    ``api_key``/``api_url`` cover the original AI-provider use case. ``extra``
+    is a generic bag of additional secret fields (e.g. host/port/database/
+    username/password for a database connection, or a REST auth header
+    value) used by Data Source credentials. At least one secret field must
+    be provided so the store never holds an empty, useless credential.
+    """
+    extra = {k: v for k, v in (extra or {}).items() if v is not None and str(v).strip() != ""}
+    if (not api_key or not api_key.strip()) and not extra:
+        raise ValueError("At least one secret field (API key or connection detail) is required")
+
     credential_id = f"cred_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
-    token = _get_fernet().encrypt(api_key.strip().encode()).decode()
+    fernet = _get_fernet()
+    token = fernet.encrypt(api_key.strip().encode()).decode() if api_key and api_key.strip() else ""
+    extra_token = fernet.encrypt(json.dumps(extra).encode()).decode() if extra else ""
     record = {
         "id": credential_id,
         "name": name.strip() or f"{provider.title()} credential",
         "provider": provider.strip().lower(),
         "api_key": token,
         "api_url": api_url or "",
+        "extra": extra_token,
+        "extra_keys": sorted(extra.keys()),
         "created_at": now,
         "updated_at": now,
     }
@@ -90,7 +111,7 @@ def create_credential(name: str, provider: str, api_key: str, api_url: Optional[
         data = _read()
         data.append(record)
         _write(data)
-    return {k: v for k, v in record.items() if k not in {"api_key", "api_url"}}
+    return {k: v for k, v in record.items() if k not in {"api_key", "api_url", "extra"}}
 
 
 def get_credential(credential_id: str) -> Optional[Dict[str, Any]]:
@@ -98,8 +119,15 @@ def get_credential(credential_id: str) -> Optional[Dict[str, Any]]:
         for item in _read():
             if item.get("id") != credential_id:
                 continue
+            fernet = _get_fernet()
             try:
-                api_key = _get_fernet().decrypt(item["api_key"].encode()).decode()
+                api_key = (
+                    fernet.decrypt(item["api_key"].encode()).decode()
+                    if item.get("api_key") else ""
+                )
+                extra: Dict[str, str] = {}
+                if item.get("extra"):
+                    extra = json.loads(fernet.decrypt(item["extra"].encode()).decode())
             except Exception as exc:
                 raise RuntimeError("Unable to decrypt credential. Check CREDENTIAL_ENCRYPTION_KEY.") from exc
             return {
@@ -108,6 +136,7 @@ def get_credential(credential_id: str) -> Optional[Dict[str, Any]]:
                 "provider": item.get("provider", "custom"),
                 "api_key": api_key,
                 "api_url": item.get("api_url", ""),
+                "extra": extra,
             }
     return None
 
