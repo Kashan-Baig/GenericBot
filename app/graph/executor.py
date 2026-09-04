@@ -66,8 +66,23 @@ def get_routed_next_node(flow: Dict[str, Any], current_node_id: Optional[str], r
             return edge.get("target")
     if route_index is not None and 0 <= route_index < len(outgoing):
         return outgoing[route_index].get("target")
-    if node_type == "switch" and wanted == "default" and outgoing:
-        return outgoing[-1].get("target")
+    if node_type in {"switch", "for_each", "foreach", "loop"}:
+        if wanted == "default" and outgoing:
+            return outgoing[-1].get("target")
+        if node_type in {"for_each", "foreach", "loop"}:
+            config = node.get("config") or node.get("data") or {}
+            if wanted == "each":
+                return (
+                    node.get("each_next_node")
+                    or config.get("each_next_node")
+                    or next((e.get("target") for e in outgoing if str(e.get("sourceHandle", "")).lower() == "each"), None)
+                )
+            if wanted == "done":
+                return (
+                    node.get("done_next_node")
+                    or config.get("done_next_node")
+                    or next((e.get("target") for e in outgoing if str(e.get("sourceHandle", "")).lower() == "done"), None)
+                )
     return None
 
 
@@ -160,8 +175,25 @@ def execute_current_node(state: ChatState) -> ChatState:
         state["current_node"] = current_node_id
 
     if current_node_id == "END":
-        state["status"] = "completed"
-        return state
+        # An END node can be used as the terminal node of a loop body.
+        # If a For Each runtime is active, reaching END means "finish this
+        # iteration and advance the loop" rather than completing the whole
+        # workflow. The For Each node itself decides whether to continue
+        # (Each) or exit (Done). A real workflow END is only completed when
+        # there is no active loop runtime.
+        loops = state.get("_loops") or {}
+        if loops:
+            active_loop_id = next(reversed(loops), None)
+            if active_loop_id and get_node_by_id(flow, active_loop_id):
+                state["current_node"] = active_loop_id
+                state["status"] = "running"
+                current_node_id = active_loop_id
+            else:
+                state["status"] = "completed"
+                return state
+        else:
+            state["status"] = "completed"
+            return state
 
     # ----------------------------------------------------------
     # Resolve current node config
@@ -211,6 +243,17 @@ def execute_current_node(state: ChatState) -> ChatState:
                 routed = get_routed_next_node(flow, current_node_id, route, route_index)
                 if routed:
                     updated_state["current_node"] = routed
+                elif node_type in {"for_each", "foreach", "loop"}:
+                    # A loop has two intentional exits. Never silently fall
+                    # back to the first edge, because that could restart the
+                    # loop forever when the Done output is not connected.
+                    if route == "done":
+                        updated_state["status"] = "completed"
+                        updated_state["current_node"] = "END"
+                    else:
+                        raise ValueError(
+                            "For Each node has no connection on its 'Each' output."
+                        )
 
             if updated_state.get("current_node") == current_node_id:
                 next_node = get_next_node(flow, current_node_id)

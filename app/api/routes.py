@@ -92,6 +92,8 @@ async def remove_credential(credential_id: str):
 
 class DataSourceTestRequest(BaseModel):
     source_type: str
+    operation: str = "fetch"
+    query_mode: str = "simple"
     credential_id: Optional[str] = None
     table: Optional[str] = None
     query: Optional[str] = None
@@ -99,6 +101,7 @@ class DataSourceTestRequest(BaseModel):
     base_url: Optional[str] = None
     file_name: Optional[str] = None
     filters: Optional[Dict[str, Any]] = None
+    values: Optional[Dict[str, Any]] = None
     limit: int = 5
 
 
@@ -111,6 +114,8 @@ async def test_data_source(request: DataSourceTestRequest):
         "type": "data_source",
         "config": {
             "source_type": request.source_type,
+            "operation": request.operation,
+            "query_mode": request.query_mode,
             "credential_id": request.credential_id,
             "table": request.table,
             "query": request.query,
@@ -118,14 +123,18 @@ async def test_data_source(request: DataSourceTestRequest):
             "base_url": request.base_url,
             "file_name": request.file_name,
             "filters": request.filters or {},
+            "values": request.values or {},
             "limit": request.limit,
+            # Write-operation tests run inside a rolled-back transaction.
+            "dry_run": request.operation.lower() != "fetch",
             "output_variable": "records",
         },
     }
     try:
         state = DataSourceNodeExecutor().execute(node_config, {"variables": {}})
         records = state["variables"]["records"]
-        return {"success": True, "count": len(records), "sample": records[: request.limit]}
+        count = state["variables"].get("records_count", len(records))
+        return {"success": True, "count": count, "sample": records[: request.limit]}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -611,7 +620,7 @@ async def chat(request: ChatRequest):
 
     try:
 
-        final_state = app_graph.invoke(state)
+        final_state = app_graph.invoke(state, config={"recursion_limit": 10000})
 
     except Exception as e:
 

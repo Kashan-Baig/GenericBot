@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv()
 
 from app.api.routes import router as api_router
+from app.api.webhooks import router as webhooks_router
 from app.flows.loader import load_flow
 
 
@@ -37,6 +38,7 @@ app.add_middleware(
 # ============================================================
 
 app.include_router(api_router)
+app.include_router(webhooks_router)
 
 
 # ============================================================

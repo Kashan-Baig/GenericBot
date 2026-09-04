@@ -50,6 +50,64 @@ def _require_identifier(value: str, what: str) -> str:
     return value
 
 
+def _resolve_variable(path: str, variables: Dict[str, Any]) -> Any:
+    """Resolve dotted workflow paths such as current_item.patient_id without stringifying."""
+    current: Any = variables
+    for part in [p.strip() for p in path.split('.') if p.strip()]:
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+        elif isinstance(current, (list, tuple)) and part.isdigit() and int(part) < len(current):
+            current = current[int(part)]
+        else:
+            raise ValueError(f"Query variable '{{{{{path}}}}}' is not available in the workflow state.")
+    return current
+
+
+def _prepare_raw_query(query: str, variables: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
+    """Turn {{workflow.variables}} into SQLAlchemy bind parameters.
+
+    This lets flow authors write readable SQL while values remain parameterized:
+      UPDATE patients SET contact_number = {{contact_number}} WHERE patient_id = {{patient_id}}
+    becomes:
+      UPDATE patients SET contact_number = :wf_0 WHERE patient_id = :wf_1
+    """
+    sql = (query or '').strip()
+    if not sql:
+        raise ValueError('Write a SQL query first.')
+
+    # One statement only. A single trailing semicolon is fine.
+    body = sql[:-1].rstrip() if sql.endswith(';') else sql
+    if ';' in body:
+        raise ValueError('Only one SQL statement is allowed in Query mode.')
+
+    params: Dict[str, Any] = {}
+    counter = 0
+
+    def repl(match: re.Match) -> str:
+        nonlocal counter
+        path = match.group(1).strip()
+        key = f'wf_{counter}'
+        counter += 1
+        params[key] = _resolve_variable(path, variables)
+        return f':{key}'
+
+    prepared = re.sub(r"\{\{\s*([^}]+?)\s*\}\}", repl, body)
+    return prepared, params
+
+
+def _query_kind(sql: str) -> str:
+    text_sql = re.sub(r"^\s*(?:--[^\n]*\n|/\*.*?\*/\s*)*", "", sql, flags=re.S).lstrip().lower()
+    if text_sql.startswith(('select ', 'with ')):
+        return 'fetch'
+    if text_sql.startswith('insert '):
+        return 'insert'
+    if text_sql.startswith('update '):
+        return 'update'
+    if text_sql.startswith('delete '):
+        return 'delete'
+    return 'other'
+
+
 def _resolve_csv_path(file_name: str) -> Path:
     CSV_ROOT.mkdir(parents=True, exist_ok=True)
     candidate = (CSV_ROOT / file_name).resolve()
@@ -147,6 +205,160 @@ def _fetch_sql(
         engine.dispose()
 
 
+
+def _mutate_sql(
+    dialect: str,
+    credential: Dict[str, Any],
+    operation: str,
+    table: str,
+    values: Dict[str, Any],
+    filters: Dict[str, Any],
+    dry_run: bool = False,
+) -> int:
+    """Execute a parameterized INSERT/UPDATE/DELETE and return affected rows."""
+    import sqlalchemy
+    from sqlalchemy import text
+
+    table = _require_identifier(table, "table name")
+    for col in values:
+        _require_identifier(col, "value column")
+    for col in filters:
+        _require_identifier(col, "filter column")
+
+    if operation in {"update", "delete"} and not filters:
+        raise ValueError(f"{operation.title()} requires at least one WHERE filter for safety.")
+    if operation in {"insert", "update"} and not values:
+        raise ValueError(f"{operation.title()} requires at least one value to write.")
+
+    extra = credential.get("extra") or {}
+    host = extra.get("host", "localhost")
+    port = extra.get("port") or ("5432" if dialect == "postgresql" else "3306")
+    database = extra.get("database", "")
+    username = extra.get("username", "")
+    password = extra.get("password", "")
+    if not database:
+        raise ValueError("Credential is missing a 'database' value.")
+
+    driver = "psycopg2" if dialect == "postgresql" else "pymysql"
+    url = sqlalchemy.engine.URL.create(
+        f"{dialect}+{driver}", username=username or None, password=password or None,
+        host=host, port=int(port) if str(port).isdigit() else None, database=database,
+    )
+    is_local_host = host in ("localhost", "127.0.0.1", "::1")
+    connect_args: Dict[str, Any] = {}
+    if dialect == "postgresql":
+        connect_args["sslmode"] = extra.get("sslmode") or ("require" if not is_local_host else "prefer")
+    elif dialect == "mysql":
+        ssl_setting = extra.get("ssl")
+        if ssl_setting is not None:
+            connect_args["ssl"] = ssl_setting
+        elif not is_local_host:
+            connect_args["ssl"] = {"ssl": {}}
+
+    engine = sqlalchemy.create_engine(url, pool_pre_ping=True, pool_recycle=300, connect_args=connect_args)
+    try:
+        params: Dict[str, Any] = {}
+        if operation == "insert":
+            cols = list(values)
+            params.update({f"v_{k}": v for k, v in values.items()})
+            sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(':v_'+k for k in cols)})"
+        else:
+            where_parts = []
+            for k, v in filters.items():
+                params[f"w_{k}"] = v
+                where_parts.append(f"{k} = :w_{k}")
+            where_sql = " AND ".join(where_parts)
+            if operation == "update":
+                set_parts = []
+                for k, v in values.items():
+                    params[f"v_{k}"] = v
+                    set_parts.append(f"{k} = :v_{k}")
+                sql = f"UPDATE {table} SET {', '.join(set_parts)} WHERE {where_sql}"
+            elif operation == "delete":
+                sql = f"DELETE FROM {table} WHERE {where_sql}"
+            else:
+                raise ValueError(f"Unsupported database operation '{operation}'.")
+
+        with engine.connect() as conn:
+            tx = conn.begin()
+            result = conn.execute(text(sql), params)
+            affected = max(int(result.rowcount or 0), 0)
+            if dry_run:
+                tx.rollback()
+            else:
+                tx.commit()
+            return affected
+    finally:
+        engine.dispose()
+
+def _execute_raw_sql(
+    dialect: str,
+    credential: Dict[str, Any],
+    operation: str,
+    query: str,
+    variables: Dict[str, Any],
+    dry_run: bool = False,
+) -> tuple[List[Dict[str, Any]], int]:
+    import sqlalchemy
+    from sqlalchemy import text
+
+    sql, params = _prepare_raw_query(query, variables)
+    kind = _query_kind(sql)
+    if operation == 'fetch':
+        if kind != 'fetch':
+            raise ValueError('Fetch + Query mode only accepts SELECT/WITH queries.')
+    elif kind != operation:
+        raise ValueError(f"The SQL starts as '{kind}', but the selected operation is '{operation}'.")
+
+    # Keep the same guardrail as Simple mode for destructive statements.
+    if operation in {'update', 'delete'} and not re.search(r"\bwhere\b", sql, flags=re.I):
+        raise ValueError(f"{operation.title()} Query mode requires a WHERE clause for safety.")
+
+    extra = credential.get('extra') or {}
+    host = extra.get('host', 'localhost')
+    port = extra.get('port') or ('5432' if dialect == 'postgresql' else '3306')
+    database = extra.get('database', '')
+    username = extra.get('username', '')
+    password = extra.get('password', '')
+    if not database:
+        raise ValueError("Credential is missing a 'database' value.")
+
+    driver = 'psycopg2' if dialect == 'postgresql' else 'pymysql'
+    url = sqlalchemy.engine.URL.create(
+        f'{dialect}+{driver}', username=username or None, password=password or None,
+        host=host, port=int(port) if str(port).isdigit() else None, database=database,
+    )
+    is_local_host = host in ('localhost', '127.0.0.1', '::1')
+    connect_args: Dict[str, Any] = {}
+    if dialect == 'postgresql':
+        connect_args['sslmode'] = extra.get('sslmode') or ('require' if not is_local_host else 'prefer')
+    elif dialect == 'mysql':
+        ssl_setting = extra.get('ssl')
+        if ssl_setting is not None:
+            connect_args['ssl'] = ssl_setting
+        elif not is_local_host:
+            connect_args['ssl'] = {'ssl': {}}
+
+    engine = sqlalchemy.create_engine(url, pool_pre_ping=True, pool_recycle=300, connect_args=connect_args)
+    try:
+        with engine.connect() as conn:
+            tx = conn.begin()
+            result = conn.execute(text(sql), params)
+            if operation == 'fetch' or result.returns_rows:
+                rows = [dict(row) for row in result.mappings().all()]
+                count = len(rows)
+            else:
+                count = max(int(result.rowcount or 0), 0)
+                rows = [{'operation': operation, 'affected_rows': count, 'dry_run': bool(dry_run)}]
+            if dry_run:
+                tx.rollback()
+            else:
+                tx.commit()
+            return rows, count
+    finally:
+        engine.dispose()
+
+
 def _fetch_rest(
     credential: Optional[Dict[str, Any]],
     base_url: Optional[str],
@@ -204,84 +416,81 @@ def _fetch_csv(file_name: str, filters: Dict[str, Any], limit: Optional[int]) ->
 
 
 class DataSourceNodeExecutor(BaseNodeExecutor):
-    """Fetches records from PostgreSQL, MySQL, a REST API, or a CSV file.
-
-    Config fields:
-      source_type:      "postgresql" | "mysql" | "rest_api" | "csv"
-      credential_id:     id of a saved credential (required for db/rest_api)
-      table:             table name (db sources) — validated, never interpolated raw SQL
-      query:              optional raw SQL (db sources) — power-user escape hatch
-      endpoint:          path or full URL (rest_api)
-      file_name:         file under app/storage/data_files (csv)
-      filters:           dict of column/param -> value (rendered against state variables)
-      limit:             optional max row count
-      output_variable:   variable name records are stored under (default "records")
-    """
+    """Fetch or mutate data through one controlled Data Source/Database node."""
 
     def execute(self, node_config: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]:
         config = node_config.get("config") or node_config.get("data") or {}
         variables = state.get("variables", {}) or {}
+        operation = str(config.get("operation") or node_config.get("operation") or "fetch").lower().strip()
+        if operation not in {"fetch", "insert", "update", "delete"}:
+            raise ValueError("Operation must be fetch, insert, update, or delete.")
 
-        source_type = str(
-            config.get("source_type") or node_config.get("source_type") or ""
-        ).lower().strip()
+        source_type = str(config.get("source_type") or node_config.get("source_type") or "").lower().strip()
         if source_type not in {"postgresql", "mysql", "rest_api", "csv"}:
-            raise ValueError(
-                f"Unsupported data source type '{source_type or '(none)'}'. "
-                "Expected one of: postgresql, mysql, rest_api, csv."
-            )
+            raise ValueError(f"Unsupported data source type '{source_type or '(none)'}'.")
+        if operation != "fetch" and source_type not in {"postgresql", "mysql"}:
+            raise ValueError("Insert, Update, and Delete are currently supported only for PostgreSQL and MySQL.")
 
         credential_id = config.get("credential_id") or node_config.get("credential_id")
         credential = get_credential(str(credential_id)) if credential_id else None
         if source_type in {"postgresql", "mysql"} and not credential:
             raise ValueError("This data source needs a saved database credential.")
 
-        # Render {{variable}} templates in filter values so a filter can
-        # reference conversation state, e.g. {"appointment_date": "{{today}}"}.
-        raw_filters = config.get("filters") or config.get("filter") or {}
-        filters: Dict[str, Any] = {}
-        if isinstance(raw_filters, dict):
-            for key, value in raw_filters.items():
-                filters[key] = render_template(str(value), variables) if isinstance(value, str) else value
+        def render_map(raw: Any) -> Dict[str, Any]:
+            out: Dict[str, Any] = {}
+            if isinstance(raw, dict):
+                for key, value in raw.items():
+                    if not str(key).strip():
+                        continue
+                    out[str(key)] = render_template(str(value), variables) if isinstance(value, str) else value
+            return out
 
+        filters = render_map(config.get("filters") or config.get("filter") or {})
+        values = render_map(config.get("values") or config.get("write_values") or {})
         limit = config.get("limit") or node_config.get("limit")
         try:
             limit = int(limit) if limit else None
         except (TypeError, ValueError):
             limit = None
 
-        if source_type in {"postgresql", "mysql"}:
-            table = config.get("table") or node_config.get("table")
-            query = config.get("query") or node_config.get("query")
-            records = _fetch_sql(source_type, credential, table, query, filters, limit)
-        elif source_type == "rest_api":
-            endpoint = render_template(
-                str(config.get("endpoint") or node_config.get("endpoint") or ""), variables
+        has_query_mode = "query_mode" in config or "query_mode" in node_config
+        query_mode = str(config.get("query_mode") or node_config.get("query_mode") or "simple").lower().strip()
+        raw_query = config.get("query") or node_config.get("query")
+
+        if source_type in {"postgresql", "mysql"} and query_mode == "sql":
+            records, count = _execute_raw_sql(
+                source_type, credential, operation, str(raw_query or ""), variables, bool(config.get("dry_run"))
             )
-            base_url = config.get("base_url") or node_config.get("base_url")
-            records = _fetch_rest(credential, base_url, endpoint, filters, limit)
-        else:  # csv
-            file_name = config.get("file_name") or node_config.get("file_name")
-            if not file_name:
-                raise ValueError("CSV data source needs a file_name.")
-            records = _fetch_csv(str(file_name), filters, limit)
+        elif operation == "fetch":
+            if source_type in {"postgresql", "mysql"}:
+                # Backwards compatibility: old flows may have a Fetch raw query without query_mode.
+                legacy_query = raw_query if raw_query and not has_query_mode else None
+                records = _fetch_sql(source_type, credential, config.get("table") or node_config.get("table"), legacy_query, filters, limit)
+            elif source_type == "rest_api":
+                endpoint = render_template(str(config.get("endpoint") or node_config.get("endpoint") or ""), variables)
+                records = _fetch_rest(credential, config.get("base_url") or node_config.get("base_url"), endpoint, filters, limit)
+            else:
+                file_name = config.get("file_name") or node_config.get("file_name")
+                if not file_name:
+                    raise ValueError("CSV data source needs a file_name.")
+                records = _fetch_csv(str(file_name), filters, limit)
+            count = len(records)
+        else:
+            table = config.get("table") or node_config.get("table")
+            if not table:
+                raise ValueError(f"{operation.title()} requires a table name.")
+            affected = _mutate_sql(source_type, credential, operation, str(table), values, filters, bool(config.get("dry_run")))
+            records = [{"operation": operation, "affected_rows": affected, "dry_run": bool(config.get("dry_run"))}]
+            count = affected
 
-        output_variable = str(
-            config.get("output_variable") or node_config.get("output_variable") or "records"
-        ).strip() or "records"
-
+        output_variable = str(config.get("output_variable") or node_config.get("output_variable") or "records").strip() or "records"
         state.setdefault("variables", {})
         state["variables"][output_variable] = records
-        state["variables"][f"{output_variable}_count"] = len(records)
-
-        logger.info(
-            "[DATA SOURCE] node='%s' type='%s' -> %d record(s) into '%s'",
-            node_config.get("id"), source_type, len(records), output_variable,
-        )
-
+        state["variables"][f"{output_variable}_count"] = count
+        logger.info("[DATA SOURCE] node='%s' op='%s' type='%s' -> count=%d into '%s'", node_config.get("id"), operation, source_type, count, output_variable)
         explicit_next = node_config.get("next_node") or config.get("next_node")
         if explicit_next:
             state["current_node"] = explicit_next
-
         state["status"] = "running"
         return state
+

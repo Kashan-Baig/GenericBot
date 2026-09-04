@@ -45,8 +45,26 @@ class EndNodeExecutor(BaseNodeExecutor):
             })
 
         # ------------------------------------------------------
-        # END
+        # END — unless this End node is being used as the terminal
+        # node of a loop body (for_each's docs explicitly support this:
+        # "the final body node should connect back to the loop").
+        #
+        # If a loop is still active, reaching End here means "finish this
+        # iteration", not "finish the whole workflow" — hand control back
+        # to the innermost active loop so it can advance to the next item
+        # (or exit for real via its own Done route once items run out).
+        # Without this check, the very first loop iteration would reach
+        # this node, immediately mark the workflow "completed", and the
+        # remaining items would never be processed.
         # ------------------------------------------------------
+        loops = state.get("_loops") or {}
+        if loops:
+            active_loop_id = next(reversed(loops), None)
+            if active_loop_id:
+                state["current_node"] = active_loop_id
+                state["status"] = "running"
+                return state
+
         state["status"] = "completed"
         state["current_node"] = "END"
         state["user_input"] = ""

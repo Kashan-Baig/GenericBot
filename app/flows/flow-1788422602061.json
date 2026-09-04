@@ -27,8 +27,8 @@
       },
       "data": null,
       "position": {
-        "x": 355,
-        "y": 76
+        "x": 301,
+        "y": 78
       }
     },
     {
@@ -57,8 +57,8 @@
       },
       "data": null,
       "position": {
-        "x": 911,
-        "y": 286
+        "x": 1156,
+        "y": 308
       }
     },
     {
@@ -71,7 +71,7 @@
       "condition": null,
       "true_node": null,
       "false_node": null,
-      "next_node": "ai-1788450719335-4",
+      "next_node": "for_each-1788453587081-4",
       "config": {
         "label": "Fetch records",
         "source_type": "postgresql",
@@ -89,46 +89,144 @@
         "model": "",
         "provider": "",
         "credential_id": "cred_8ae8b59fd14b",
-        "query": "SELECT\n    a.patient_id,\n    a.expected_time,\n    a.appointment_date,\n    p.contact_number,\n    p.full_name\nFROM appointments a\nJOIN patients p\n    ON a.patient_id = p.patient_id\nWHERE a.status = 'PENDING';",
+        "query": "SELECT\n    a.patient_id,\n    a.appointment_date,\n    p.contact_number,\n    p.full_name\nFROM appointments a\nJOIN patients p\n    ON a.patient_id = p.patient_id\nWHERE a.status = 'PENDING';",
         "credential_name": "Medflow"
       },
       "data": null,
       "position": {
-        "x": 637,
-        "y": 69
+        "x": 901,
+        "y": 75
       }
     },
     {
-      "id": "ai-1788450719335-4",
-      "type": "ai",
-      "message": "You are a patient information assistant.\n\nPatient records from the database:\n{{pending_appointments}}\n\nGive the User patients information without any changes form db just it should be in clean readable form not table forms\n\nFor each patient show:\n- Full Name\n- Contact Number\n- Appointement date \n-expected time\n\nDo not invent information.",
+      "id": "for_each-1788453587081-4",
+      "type": "for_each",
+      "message": null,
       "text": null,
       "options": null,
       "variable": null,
       "condition": null,
       "true_node": null,
       "false_node": null,
-      "next_node": "end-1788440558428-4",
+      "next_node": null,
       "config": {
-        "label": "AI response",
-        "prompt": "You are a patient information assistant.\n\nPatient records from the database:\n{{pending_appointments}}\n\nGive the User patients information without any changes form db just it should be in clean readable form not table forms\n\nFor each patient show:\n- Full Name\n- Contact Number\n- Appointement date \n-expected time\n\nDo not invent information.",
-        "api_url": "",
-        "api_key": "",
-        "model": "openai/gpt-oss-120b",
-        "provider": "groq",
-        "credential_id": "cred_51eb2faa0189",
-        "credential_name": ""
+        "label": "For Each item",
+        "input_variable": "pending_appointments",
+        "item_variable": "current_appointment",
+        "index_variable": "index"
       },
       "data": null,
       "position": {
         "x": 560,
         "y": 290
       },
-      "prompt": "You are a patient information assistant.\n\nPatient records from the database:\n{{pending_appointments}}\n\nGive the User patients information without any changes form db just it should be in clean readable form not table forms\n\nFor each patient show:\n- Full Name\n- Contact Number\n- Appointement date \n-expected time\n\nDo not invent information.",
-      "credential_id": "cred_51eb2faa0189",
+      "input_variable": "pending_appointments",
+      "item_variable": "current_appointment",
+      "index_variable": "index",
+      "each_next_node": "ai-1788453620395-5",
+      "done_next_node": "end-1788440558428-4"
+    },
+    {
+      "id": "ai-1788453620395-5",
+      "type": "ai",
+      "message": "You are testing an appointment loop.\n\nCurrent patient:\n{{current_appointment.full_name}}\n\nPatient ID:\n{{current_appointment.patient_id}}\n\nContact number:\n{{current_appointment.contact_number}}\n\nAppointment date:\n{{current_appointment.appointment_date}}\n\nAppointment time:\n{{current_appointment.expected_time}}\n\nIteration:\n{{index}}\n\nReturn exactly:\n\nPatient: [name]\nPhone: [phone]\nDate: [date]\nTime: [time]\nIteration: [index]",
+      "text": null,
+      "options": null,
+      "variable": null,
+      "condition": null,
+      "true_node": null,
+      "false_node": null,
+      "next_node": "whatsapp-1788453700000-6",
+      "config": {
+        "label": "AI response",
+        "prompt": "You are testing an appointment loop.\n\nCurrent patient:\n{{current_appointment.full_name}}\n\nPatient ID:\n{{current_appointment.patient_id}}\n\nContact number:\n{{current_appointment.contact_number}}\n\nAppointment date:\n{{current_appointment.appointment_date}}\n\nAppointment time:\n{{current_appointment.expected_time}}\n\nIteration:\n{{index}}\n\nReturn exactly:\n\nPatient: [name]\nPhone: [phone]\nDate: [date]\nTime: [time]\nIteration: [index]",
+        "api_url": "",
+        "api_key": "",
+        "model": "openai/gpt-oss-120b",
+        "provider": "groq",
+        "credential_id": "cred_2860e81c98f5",
+        "credential_name": "new"
+      },
+      "data": null,
+      "position": {
+        "x": 860,
+        "y": 290
+      },
+      "prompt": "You are testing an appointment loop.\n\nCurrent patient:\n{{current_appointment.full_name}}\n\nPatient ID:\n{{current_appointment.patient_id}}\n\nContact number:\n{{current_appointment.contact_number}}\n\nAppointment date:\n{{current_appointment.appointment_date}}\n\nAppointment time:\n{{current_appointment.expected_time}}\n\nIteration:\n{{index}}\n\nReturn exactly:\n\nPatient: [name]\nPhone: [phone]\nDate: [date]\nTime: [time]\nIteration: [index]",
+      "credential_id": "cred_2860e81c98f5",
       "model": "openai/gpt-oss-120b",
       "provider": "groq"
+    },
+    {
+      "id": "whatsapp-1788453700000-6",
+      "type": "whatsapp",
+      "message": null,
+      "text": null,
+      "options": null,
+      "variable": null,
+      "condition": null,
+      "true_node": null,
+      "false_node": null,
+      "next_node": "for_each-1788453587081-4",
+      "config": {
+        "label": "Send reminder",
+        "to": "{{current_appointment.contact_number}}",
+        "message": "{{ai_response}}",
+        "credential_id": "",
+        "text": "",
+        "options": [],
+        "variable": "",
+        "condition": "",
+        "prompt": "",
+        "api_url": "",
+        "api_key": "",
+        "model": "",
+        "provider": ""
+      },
+      "data": null,
+      "position": {
+        "x": 1050,
+        "y": 290
+      }
     }
   ],
-  "edges": []
+  "edges": [
+    {
+      "id": "edge-start-1788422602061-0-data_source-1788442982686-4-1788453694249",
+      "source": "start-1788422602061-0",
+      "target": "data_source-1788442982686-4",
+      "sourceHandle": "next"
+    },
+    {
+      "id": "edge-data_source-1788442982686-4-for_each-1788453587081-4-1788453587081",
+      "source": "data_source-1788442982686-4",
+      "target": "for_each-1788453587081-4"
+    },
+    {
+      "id": "edge-for_each-1788453587081-4-ai-1788453620395-5-1788453620395",
+      "source": "for_each-1788453587081-4",
+      "target": "ai-1788453620395-5",
+      "sourceHandle": "each",
+      "label": "Each"
+    },
+    {
+      "id": "edge-ai-1788453620395-5-whatsapp-1788453700000-6-1788453679476",
+      "source": "ai-1788453620395-5",
+      "target": "whatsapp-1788453700000-6",
+      "sourceHandle": "next"
+    },
+    {
+      "id": "edge-whatsapp-1788453700000-6-for_each-1788453587081-4-loopback",
+      "source": "whatsapp-1788453700000-6",
+      "target": "for_each-1788453587081-4",
+      "sourceHandle": "next"
+    },
+    {
+      "id": "edge-for_each-1788453587081-4-end-1788440558428-4-done",
+      "source": "for_each-1788453587081-4",
+      "target": "end-1788440558428-4",
+      "sourceHandle": "done",
+      "label": "Done"
+    }
+  ]
 }

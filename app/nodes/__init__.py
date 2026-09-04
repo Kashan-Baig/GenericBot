@@ -1,5 +1,8 @@
 import logging
 import os
+import random
+import re
+import time
 from typing import Dict, Any, Optional
 
 import httpx
@@ -12,6 +15,8 @@ from app.nodes.condition import ConditionNodeExecutor
 from app.nodes.end import EndNodeExecutor
 from app.nodes.switch import SwitchNodeExecutor
 from app.nodes.data_source import DataSourceNodeExecutor
+from app.nodes.for_each import ForEachNodeExecutor
+from app.nodes.whatsapp import WhatsAppNodeExecutor
 from app.storage.credentials import get_credential
 
 logger = logging.getLogger("flow_engine.nodes.ai")
@@ -121,24 +126,63 @@ class AIResponseNodeExecutor(BaseNodeExecutor):
         return None
 
     def _call_openai_style(self, api_url: str, api_key: Optional[str], model: str, prompt: str) -> str:
-        """Call an OpenAI-compatible chat-completions endpoint."""
+        """Call an OpenAI-compatible endpoint with automatic 429 backoff.
+
+        Rate limits are usually transient. Respect Retry-After when present,
+        otherwise parse provider hints such as "try again in 2s", then fall
+        back to exponential backoff with small jitter. Non-429 errors still fail
+        immediately so configuration/auth problems remain obvious.
+        """
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         payload = {"model": model, "messages": [{"role": "user", "content": prompt}]}
+
+        max_attempts = 4
         with httpx.Client(timeout=60.0, follow_redirects=True) as client:
-            resp = client.post(api_url, json=payload, headers=headers)
-            if resp.status_code >= 400:
-                # Keep the provider response body: it is dramatically more useful
-                # than a bare `404 Not Found` when debugging a provider config.
-                try:
-                    detail = resp.json()
-                except Exception:
-                    detail = resp.text[:1000]
-                raise RuntimeError(
-                    f"HTTP {resp.status_code} from AI provider at {api_url}: {detail}"
-                )
-            data = resp.json()
+            for attempt in range(1, max_attempts + 1):
+                resp = client.post(api_url, json=payload, headers=headers)
+
+                if resp.status_code == 429 and attempt < max_attempts:
+                    delay = None
+                    retry_after = resp.headers.get("Retry-After")
+                    if retry_after:
+                        try:
+                            delay = max(0.0, float(retry_after))
+                        except ValueError:
+                            delay = None
+
+                    if delay is None:
+                        body = resp.text or ""
+                        match = re.search(r"try again in\s+([0-9.]+)s", body, re.IGNORECASE)
+                        if match:
+                            delay = float(match.group(1))
+
+                    if delay is None:
+                        delay = min(8.0, 2 ** (attempt - 1))
+
+                    delay += random.uniform(0.05, 0.25)
+                    logger.warning(
+                        "AI provider rate limit (429) for model '%s'; retrying in %.2fs (%s/%s)",
+                        model, delay, attempt, max_attempts - 1,
+                    )
+                    time.sleep(delay)
+                    continue
+
+                if resp.status_code >= 400:
+                    try:
+                        detail = resp.json()
+                    except Exception:
+                        detail = resp.text[:1000]
+                    raise RuntimeError(
+                        f"HTTP {resp.status_code} from AI provider at {api_url}: {detail}"
+                    )
+
+                data = resp.json()
+                break
+            else:
+                raise RuntimeError(f"AI provider request failed after {max_attempts} attempts.")
+
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         if isinstance(content, list):
             content = "".join(
@@ -364,6 +408,11 @@ class AIResponseNodeExecutor(BaseNodeExecutor):
         else:
             state["response"] = ai_text
 
+        output_variable = str(
+            config.get("output_variable") or node_config.get("output_variable") or "ai_response"
+        ).strip() or "ai_response"
+        state.setdefault("variables", {})[output_variable] = ai_text
+
         state.setdefault("conversation_history", []).append({
             "role": "assistant", "type": "ai_response", "content": ai_text,
         })
@@ -384,6 +433,8 @@ _end_exec = EndNodeExecutor()
 _switch_exec = SwitchNodeExecutor()
 _ai_exec = AIResponseNodeExecutor()
 _data_source_exec = DataSourceNodeExecutor()
+_for_each_exec = ForEachNodeExecutor()
+_whatsapp_exec = WhatsAppNodeExecutor()
 
 _registry: Dict[str, BaseNodeExecutor] = {
     "start": _start_exec,
@@ -401,6 +452,12 @@ _registry: Dict[str, BaseNodeExecutor] = {
     "llm": _ai_exec,
     "data_source": _data_source_exec,
     "database": _data_source_exec,
+    "for_each": _for_each_exec,
+    "foreach": _for_each_exec,
+    "loop": _for_each_exec,
+    "whatsapp": _whatsapp_exec,
+    "whatsapp_send": _whatsapp_exec,
+    "send_whatsapp": _whatsapp_exec,
 }
 
 

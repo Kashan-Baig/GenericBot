@@ -141,7 +141,103 @@ def get_credential(credential_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def find_whatsapp_channel(phone_number_id: str) -> Optional[Dict[str, Any]]:
+    """Find the WhatsApp credential bound to a Cloud API ``phone_number_id``.
+
+    Used by the inbound webhook to figure out which flow should answer a
+    message that just arrived on a given WhatsApp Business number, and
+    which access token to reply with. Returns ``None`` if no ``provider:
+    "whatsapp"`` credential has a matching ``extra.phone_number_id``.
+    """
+    with _lock:
+        fernet = _get_fernet()
+        for item in _read():
+            if item.get("provider") != "whatsapp":
+                continue
+            try:
+                extra = (
+                    json.loads(fernet.decrypt(item["extra"].encode()).decode())
+                    if item.get("extra") else {}
+                )
+            except Exception:
+                continue
+            if extra.get("phone_number_id") != phone_number_id:
+                continue
+            try:
+                api_key = (
+                    fernet.decrypt(item["api_key"].encode()).decode()
+                    if item.get("api_key") else ""
+                )
+            except Exception:
+                continue
+            return {
+                "credential_id": item["id"],
+                "flow_id": extra.get("flow_id"),
+                "access_token": api_key,
+                "phone_number_id": extra.get("phone_number_id"),
+                "verify_token": extra.get("verify_token"),
+            }
+    return None
+
+
+def find_whatsapp_channel_by_verify_token(verify_token: str) -> Optional[Dict[str, Any]]:
+    """Find a WhatsApp credential by its webhook verify token (used for Meta's GET handshake)."""
+    if not verify_token:
+        return None
+    with _lock:
+        fernet = _get_fernet()
+        for item in _read():
+            if item.get("provider") != "whatsapp":
+                continue
+            try:
+                extra = (
+                    json.loads(fernet.decrypt(item["extra"].encode()).decode())
+                    if item.get("extra") else {}
+                )
+            except Exception:
+                continue
+            if extra.get("verify_token") and extra.get("verify_token") == verify_token:
+                return {"credential_id": item["id"], "flow_id": extra.get("flow_id")}
+    return None
+
+
+
+
+def find_360dialog_channel() -> Optional[Dict[str, Any]]:
+    """Return the saved 360dialog credential bound to a reply flow."""
+    with _lock:
+        fernet = _get_fernet()
+        for item in _read():
+            if item.get("provider") != "360dialog":
+                continue
+            try:
+                extra = (
+                    json.loads(fernet.decrypt(item["extra"].encode()).decode())
+                    if item.get("extra") else {}
+                )
+                api_key = (
+                    fernet.decrypt(item["api_key"].encode()).decode()
+                    if item.get("api_key") else ""
+                )
+            except Exception:
+                continue
+            if not extra.get("flow_id"):
+                continue
+            return {
+                "credential_id": item["id"],
+                "flow_id": extra.get("flow_id"),
+                "api_key": api_key,
+                "environment": extra.get("environment") or "sandbox",
+            }
+    return None
+
+
 def delete_credential(credential_id: str) -> bool:
+    """Delete a saved credential by ID.
+
+    Returns True when a credential was removed, or False when the ID was not
+    present. This mirrors the contract used by DELETE /credentials/{id}.
+    """
     with _lock:
         data = _read()
         new_data = [item for item in data if item.get("id") != credential_id]
